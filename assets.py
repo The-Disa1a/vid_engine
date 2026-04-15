@@ -3,6 +3,106 @@ from PIL import Image, ImageDraw, ImageFont
 import pytesseract
 from vid_engine import context
 
+def get_youtube_gameplay(game_name):
+    search_query = f"{game_name} gameplay no commentary creative commons"
+    print(f"\n[📡] Searching YouTube for global gameplay hook: '{search_query}'...", flush=True)
+
+    cmd =["yt-dlp", f"ytsearch10:{search_query}", "--dump-json", "--no-playlist", "--flat-playlist"]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    all_videos =[]
+    for line in result.stdout.strip().split("\n"):
+        if not line: continue
+        try:
+            data = json.loads(line)
+            vid_id = data.get("id")
+            title = data.get("title")
+            dur = data.get("duration", 0)
+            if vid_id and title and dur > 60:
+                all_videos.append({"id": vid_id, "title": title, "duration": dur})
+        except: pass
+
+    if not all_videos:
+        print(f"[⚠️] No YouTube gameplay found for {game_name}.", flush=True)
+        return None
+
+    ranked_id = all_videos[0]['id']
+    ranked_dur = all_videos[0]['duration']
+    
+    try:
+        from google import genai
+        from google.genai import types
+
+        system_instruction = "You are a YouTube Gaming aesthetic evaluator. Pick the best high-quality gameplay video to use as a background hook. Avoid weird mods or tutorials. Return a JSON with the key 'id'."
+        
+        schema_def = genai.types.Schema(
+            type = genai.types.Type.OBJECT,
+            required =["id"],
+            properties = {"id": genai.types.Schema(type = genai.types.Type.STRING)},
+        )
+
+        cfg = types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
+            response_mime_type="application/json",
+            response_schema=schema_def,
+            system_instruction=[types.Part.from_text(text=system_instruction)]
+        )
+
+        prompt = f"Target Game: {game_name}\nAvailable Videos:\n"
+        for v in all_videos: prompt += f"- ID: {v['id']} | Title: {v['title']}\n"
+
+        for m in context.GEMMA_MODELS:
+            success = False
+            while context.CURRENT_GEMINI_INDEX < len(context.GEMINI_API_KEYS):
+                try:
+                    client = genai.Client(api_key=context.GEMINI_API_KEYS[context.CURRENT_GEMINI_INDEX])
+                    resp = client.models.generate_content(
+                        model=m,
+                        contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+                        config=cfg
+                    )
+                    
+                    clean_text = re.sub(r'^```(?:json)?\s*', '', resp.text.strip())
+                    clean_text = re.sub(r'\s*```$', '', clean_text)
+                    parsed_json = json.loads(clean_text)
+
+                    if "id" in parsed_json:
+                        selected_id = parsed_json["id"]
+                        valid_match = next((v for v in all_videos if v['id'] == selected_id), None)
+                        if valid_match:
+                            ranked_id = valid_match['id']
+                            ranked_dur = valid_match['duration']
+                            print(f"[🤖 Gemma Choosed]: {valid_match['title']}", flush=True)
+                            success = True
+                            break
+                except Exception as e:
+                    err_str = str(e)
+                    if "429" in err_str or "quota" in err_str.lower(): context.CURRENT_GEMINI_INDEX += 1
+                    else: break
+            if success: break
+    except: pass
+
+    start_time = min(int(ranked_dur * 0.2), max(0, ranked_dur - 180))
+    end_time = start_time + 180
+    fname = f"yt_bg_{ranked_id}.mp4"
+    
+    if not os.path.exists(fname):
+        print(f"   📦 Slicing YouTube Video '{ranked_id}' (Extracting {start_time}s to {end_time}s)...", flush=True)
+        dl_cmd =[
+            "yt-dlp",
+            "-f", "bestvideo[height<=1080][ext=mp4]/bestvideo[ext=mp4]/best",
+            "--download-sections", f"*{start_time}-{end_time}",
+            f"https://www.youtube.com/watch?v={ranked_id}",
+            "-o", fname
+        ]
+        subprocess.run(dl_cmd, capture_output=True)
+
+    if os.path.exists(fname):
+        print("[✅] YouTube hook successfully sliced and downloaded!", flush=True)
+        return fname
+        
+    return None
+
 def fetch_and_choose_bgm(mood_phrase):
     search_query = f"{mood_phrase} background music audio library no copyright"
     print(f"[📡] Searching SoundCloud via yt-dlp for: '{search_query}'...", flush=True)
@@ -110,7 +210,7 @@ def get_giphy_gif(search_query, sentence_context):
         prompt = f"Video Sentence: {sentence_context}\nAvailable GIFs from Giphy:\n"
         for g in gif_list: prompt += f"- ID: {g['id']} | Title: {g['title']}\n"
 
-        ranked_ids = []
+        ranked_ids =[]
         if context.ADV_OUTPUT: print(f"[🧠] Gemma is evaluating and ranking {len(gif_list)} Giphy results...", flush=True)
 
         for m in context.GEMMA_MODELS:
@@ -139,7 +239,7 @@ def get_giphy_gif(search_query, sentence_context):
                     if "matches" in parsed_json and parsed_json["matches"]:
                         ranked_ids = [item["id"] for item in parsed_json["matches"] if "id" in item]
                         if ranked_ids:
-                            display_list = [f"{rid}:{next((g['title'] for g in gif_list if g['id'] == rid), 'Unknown')}" for rid in ranked_ids]
+                            display_list =[f"{rid}:{next((g['title'] for g in gif_list if g['id'] == rid), 'Unknown')}" for rid in ranked_ids]
                             print(f"[🤖 Gif's Gemma Choosed]: {json.dumps(display_list)}", flush=True)
                             success = True
                             break
@@ -314,11 +414,6 @@ def get_background_videos(keywords, target_duration, prefix_idx, sentence_contex
         if "nature" not in keywords: return get_background_videos(["nature"], target_duration, prefix_idx, sentence_context)
         raise Exception("No Background Videos found.")
 
-    if context.ADV_OUTPUT:
-        print(f"\n      --- 🔎 BACKGROUND VIDEO RESULTS FOR '{keywords[0]}' ---", flush=True)
-        for v in all_videos: print(f"         - ID: {v['id']} | Desc: {v['desc']} | Source: {v['source']}", flush=True)
-        print("      ---------------------------------------------------------", flush=True)
-
     ranked_ids =[]
     if sentence_context and len(all_videos) > 1:
         try:
@@ -351,8 +446,6 @@ def get_background_videos(keywords, target_duration, prefix_idx, sentence_contex
             prompt = f"Video Sentence: {sentence_context}\nAvailable Background Videos:\n"
             for v in all_videos: prompt += f"- ID: {v['id']} | Desc: {v['desc']} | Source: {v['source']}\n"
 
-            if context.ADV_OUTPUT: print(f"[🧠] Gemma is evaluating and ranking {len(all_videos)} Background Videos...", flush=True)
-
             for m in context.GEMMA_MODELS:
                 success = False
                 while context.CURRENT_GEMINI_INDEX < len(context.GEMINI_API_KEYS):
@@ -364,14 +457,7 @@ def get_background_videos(keywords, target_duration, prefix_idx, sentence_contex
                             config=cfg
                         )
 
-                        print("      [📡] Stream: ", end="", flush=True)
-                        full_text = ""
-                        for chunk in resp_stream:
-                            if chunk.text:
-                                print(".", end="", flush=True)
-                                full_text += chunk.text
-                        print(" [Done!]", flush=True)
-
+                        full_text = "".join([chunk.text for chunk in resp_stream if chunk.text])
                         clean_text = re.sub(r'^```(?:json)?\s*', '', full_text.strip())
                         clean_text = re.sub(r'\s*```$', '', clean_text)
                         parsed_json = json.loads(clean_text)
@@ -379,8 +465,6 @@ def get_background_videos(keywords, target_duration, prefix_idx, sentence_contex
                         if "matches" in parsed_json and parsed_json["matches"]:
                             ranked_ids = [item["id"] for item in parsed_json["matches"] if "id" in item]
                             if ranked_ids:
-                                display_list = [f"{rid}:{next((v['desc'] for v in all_videos if v['id'] == rid), 'Unknown')}" for rid in ranked_ids]
-                                print(f"[🤖 BG Video's Gemma Choosed]: {json.dumps(display_list)}", flush=True)
                                 success = True
                                 break
                     except Exception as e:
@@ -388,7 +472,7 @@ def get_background_videos(keywords, target_duration, prefix_idx, sentence_contex
                         if "429" in err_str or "quota" in err_str.lower(): context.CURRENT_GEMINI_INDEX += 1
                         else: break
                 if success: break
-        except Exception as e: pass
+        except: pass
 
     ranked_videos =[]
     for rid in ranked_ids:
