@@ -95,26 +95,32 @@ def get_youtube_gameplay(game_name):
             if success: break
     except: pass
 
-    start_time = min(int(ranked_dur * 0.2), max(0, ranked_dur - 180))
-    end_time = start_time + 180
-    
-    existing = glob.glob(f"yt_bg_{ranked_id}.*")
-    if existing:
-        print(f"[✅] YouTube hook already exists: {existing[0]}", flush=True)
-        return existing[0]
+    # --- CALCULATE STRICT 3-MINUTE SLICE ---
+    slice_length = 180
+    if ranked_dur <= slice_length:
+        start_time = 0
+        end_time = ranked_dur
+    else:
+        start_time = min(int(ranked_dur * 0.2), ranked_dur - slice_length)
+        end_time = start_time + slice_length
+        
+    final_file = f"yt_bg_{ranked_id}.mp4"
+    if os.path.exists(final_file):
+        print(f"[✅] YouTube hook already exists: {final_file}", flush=True)
+        return final_file
 
-    print(f"   📦 Slicing YouTube Video '{ranked_id}' (Extracting {start_time}s to {end_time}s)...", flush=True)
-    out_tmpl = f"yt_bg_{ranked_id}.%(ext)s"
+    # --- DOWNLOAD FULL VIDEO FIRST ---
+    temp_full_file = f"temp_full_{ranked_id}.mp4"
+    print(f"   📦 Downloading FULL YouTube Video '{ranked_id}' (Restricted to 1080p MP4)...", flush=True)
     
-    # 🟢 BYPASS FIX: Added the impersonate and android client args here as well.
     dl_cmd =[
         "yt-dlp",
-        "-f", "bestvideo[height<=1080]/bestvideo/best",
-        "--download-sections", f"*{start_time}-{end_time}",
+        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
+        "--merge-output-format", "mp4",
         "--force-overwrites",
         "--impersonate", "chrome",
         "--extractor-args", "youtube:player_client=android,web",
-        "-o", out_tmpl
+        "-o", temp_full_file
     ]
     
     if os.path.exists("cookies.txt"):
@@ -124,14 +130,41 @@ def get_youtube_gameplay(game_name):
     
     result = subprocess.run(dl_cmd, capture_output=True, text=True)
     
-    downloaded = glob.glob(f"yt_bg_{ranked_id}.*")
-    if downloaded:
-        print(f"[✅] YouTube hook successfully sliced and downloaded! ({downloaded[0]})", flush=True)
-        return downloaded[0]
+    # Verify download succeeded (accounting for extension changes)
+    downloaded_temp = glob.glob(f"temp_full_{ranked_id}.*")
+    
+    if not downloaded_temp:
+        print(f"   [⚠️] yt-dlp full download failed. Error:\n{result.stderr}", flush=True)
+        return None
+
+    actual_temp_file = downloaded_temp[0]
+    
+    # --- SLICE LOCALLY WITH FFMPEG ---
+    print(f"   ✂️ Slicing exactly {end_time - start_time}s using FFmpeg (No re-encoding)...", flush=True)
+    
+    ffmpeg_cmd =[
+        "ffmpeg", "-y",
+        "-ss", str(start_time),
+        "-to", str(end_time),
+        "-i", actual_temp_file,
+        "-c", "copy",
+        final_file
+    ]
+    
+    subprocess.run(ffmpeg_cmd, capture_output=True)
+    
+    # --- CLEANUP MASSIVE FULL VIDEO ---
+    try:
+        os.remove(actual_temp_file)
+        print("   🧹 Deleted massive temp video to save space.", flush=True)
+    except: pass
+
+    if os.path.exists(final_file):
+        print(f"[✅] YouTube hook successfully downloaded and sliced! ({final_file})", flush=True)
+        return final_file
     else:
-        print(f"   [⚠️] yt-dlp slice failed. Error:\n{result.stderr}", flush=True)
-        
-    return None
+        print("   [⚠️] FFmpeg local slicing failed.", flush=True)
+        return None
 
 def fetch_and_choose_bgm(mood_phrase):
     search_query = f"{mood_phrase} background music audio library no copyright"
@@ -321,11 +354,11 @@ def get_giphy_gif(search_query, sentence_context):
                     os.remove(fname)
                     continue
                 else:
-                    if context.ADV_OUTPUT: print(f"      [✅] GIF '{gif_obj['title']}' passed multi-frame OCR checks!", flush=True)
+                    if context.ADV_OUTPUT: print(f"[✅] GIF '{gif_obj['title']}' passed multi-frame OCR checks!", flush=True)
                     return fname, gif_obj['title']
 
             except Exception as e:
-                print(f"      [⚠️] OCR failure on '{gif_obj['title']}': {e}", flush=True)
+                print(f"[⚠️] OCR failure on '{gif_obj['title']}': {e}", flush=True)
                 return fname, gif_obj['title']
 
     except Exception as e: pass
