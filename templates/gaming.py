@@ -38,6 +38,9 @@ class GamingTemplate(BaseTemplate):
 
         def process_frame(get_frame, t):
             frame = get_frame(t)
+            
+            # 🔥 CRITICAL FIX: Force uint8 so ColorClip (or weird streams) don't crash PIL with <i8/float
+            frame = np.array(frame, dtype=np.uint8)
 
             ag = None
             for g in groups:
@@ -200,7 +203,7 @@ class GamingTemplate(BaseTemplate):
         total_dur = aud.end
 
         if kw:
-            pps = kw.get("gifs", [])
+            pps = kw.get("gifs",[])
             wks = kw.get("wiki",[])
             pps_list =[f"{p.get('keyword', '')}:{p.get('search_query', '')}" for p in pps if p.get('keyword')]
             wks_list =[f"{w.get('keyword', '')}:{w.get('search', '')}" for w in wks if w.get('keyword')]
