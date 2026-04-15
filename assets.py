@@ -7,9 +7,17 @@ def get_youtube_gameplay(game_name):
     search_query = f"{game_name} gameplay no commentary creative commons"
     print(f"\n[📡] Searching YouTube for global gameplay hook: '{search_query}'...", flush=True)
 
-    cmd =["yt-dlp", f"ytsearch10:{search_query}", "--dump-json", "--no-playlist", "--flat-playlist"]
+    # 🟢 BYPASS FIX: Impersonate Chrome and skip the web player
+    cmd =[
+        "yt-dlp", 
+        f"ytsearch10:{search_query}", 
+        "--dump-json", 
+        "--no-playlist", 
+        "--flat-playlist",
+        "--impersonate", "chrome",
+        "--extractor-args", "youtube:player_client=android,web"
+    ]
     
-    # 🟢 COOKIE INJECTION (For the Search)
     if os.path.exists("cookies.txt"):
         cmd.extend(["--cookies", "cookies.txt"])
 
@@ -98,16 +106,17 @@ def get_youtube_gameplay(game_name):
     print(f"   📦 Slicing YouTube Video '{ranked_id}' (Extracting {start_time}s to {end_time}s)...", flush=True)
     out_tmpl = f"yt_bg_{ranked_id}.%(ext)s"
     
-    # 🔥 FIXED FORMAT: Grab best video regardless of whether it's mp4, webm, or mkv.
+    # 🟢 BYPASS FIX: Added the impersonate and android client args here as well.
     dl_cmd =[
         "yt-dlp",
         "-f", "bestvideo[height<=1080]/bestvideo/best",
         "--download-sections", f"*{start_time}-{end_time}",
         "--force-overwrites",
+        "--impersonate", "chrome",
+        "--extractor-args", "youtube:player_client=android,web",
         "-o", out_tmpl
     ]
     
-    # 🟢 COOKIE INJECTION (For the Download Slice)
     if os.path.exists("cookies.txt"):
         dl_cmd.extend(["--cookies", "cookies.txt"])
         
@@ -146,7 +155,7 @@ def fetch_and_choose_bgm(mood_phrase):
         else:
             print(f"      [⚠️] yt-dlp download failed to create file. Error log: {result.stderr}", flush=True)
     except Exception as e:
-        print(f"      [⚠️] yt-dlp execution failed: {e}", flush=True)
+        print(f"[⚠️] yt-dlp execution failed: {e}", flush=True)
     return None
 
 def scrape_wikipedia_image(search_title):

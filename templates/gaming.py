@@ -22,7 +22,7 @@ class GamingTemplate(BaseTemplate):
         fp = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
         if not os.path.exists(fp): fp = "arial.ttf"
 
-        groups, cur = [],[]
+        groups, cur =[],[]
         for i, s in enumerate(subs):
             cur.append(s)
             
@@ -38,8 +38,6 @@ class GamingTemplate(BaseTemplate):
 
         def process_frame(get_frame, t):
             frame = get_frame(t)
-            
-            # 🔥 CRITICAL FIX: Force uint8 so ColorClip (or weird streams) don't crash PIL with <i8/float
             frame = np.array(frame, dtype=np.uint8)
 
             ag = None
@@ -126,7 +124,7 @@ class GamingTemplate(BaseTemplate):
             start_y = H - total_block_h - margin_bottom
 
             if active_cards:
-                drawn_active = [p for p in active_cards if p['intensity'] > 0.01]
+                drawn_active =[p for p in active_cards if p['intensity'] > 0.01]
                 draw_gap_px = 20 * (sum(p['intensity'] for p in drawn_active) / len(drawn_active)) if drawn_active else 0
 
                 items_to_draw =[]
@@ -192,6 +190,9 @@ class GamingTemplate(BaseTemplate):
             self.bg_video_file = get_youtube_gameplay(game_name)
             if self.bg_video_file:
                 self.bg_video_clip = VideoFileClip(self.bg_video_file)
+            else:
+                # 🟢 FAIL FAST: Throw error if video failed
+                raise Exception("CRITICAL_YOUTUBE_FAILURE: YouTube hook video could not be downloaded.")
 
         print(f"\n--- Scene {idx+1} ---", flush=True)
         af, sf = f"a{idx}.mp3", f"s{idx}.vtt"
@@ -274,8 +275,7 @@ class GamingTemplate(BaseTemplate):
             else: c = c.crop(x_center=w/2, y_center=h/2, width=w, height=int(w/ta))
             bg_clip = c.resize(res)
         else:
-            print("   [⚠️] No YouTube BG found, falling back to Black Screen...", flush=True)
-            bg_clip = ColorClip(size=res, color=(0,0,0), duration=total_dur)
+            raise Exception("CRITICAL_YOUTUBE_FAILURE: YouTube hook video missing.")
 
         vid = bg_clip.set_audio(aud)
         final_clip = self.build_layer(vid, subs, res, popups)

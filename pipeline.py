@@ -52,6 +52,10 @@ def build_video_pipeline(target_text, out_name, template=None):
         except Exception as e:
             print(f"[!] Scene {i+1} failed: {e}", flush=True)
             traceback.print_exc()
+            # 🟢 FAIL FAST LOGIC
+            if "CRITICAL_YOUTUBE_FAILURE" in str(e):
+                print("\n[❌] ABORTING PIPELINE: Gaming Template requires the YouTube background video to continue.", flush=True)
+                return False
 
     OUT = f"{out_name.replace(' ', '_')}.mp4"
 
