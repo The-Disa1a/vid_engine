@@ -31,8 +31,17 @@ def get_youtube_gameplay(game_name):
             vid_id = data.get("id")
             title = data.get("title")
             dur = data.get("duration", 0)
-            if vid_id and title and dur > 60:
-                all_videos.append({"id": vid_id, "title": title, "duration": dur})
+            license_type = (data.get("license") or "").lower()
+
+            if (
+                vid_id and title and dur > 60
+                and "creative commons" in license_type
+            ):
+                all_videos.append({
+                    "id": vid_id,
+                    "title": title,
+                    "duration": dur
+                })
         except: pass
 
     if not all_videos:
@@ -115,9 +124,11 @@ def get_youtube_gameplay(game_name):
     
     dl_cmd =[
         "yt-dlp",
-        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
+        "-f", "bv*/bestvideo/best",
         "--merge-output-format", "mp4",
         "--force-overwrites",
+        "--js-runtimes", "node",
+        "--extractor-args", "youtube:player_client=web",
         "--impersonate", "chrome",
         "--extractor-args", "youtube:player_client=android,web",
         "-o", temp_full_file
