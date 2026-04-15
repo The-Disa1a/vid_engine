@@ -33,7 +33,8 @@ VIDEO_CODEC = "libx264"
 # Global tracker to protect final exports from cleanup
 SUCCESSFUL_VIDEOS =[]
 
-# System Prompts
+# System Prompts (Dynamically loaded from GitHub)
 SYS_PROMPT_SUPERVISOR = ""
 SYS_PROMPT_GIF = ""
 SYS_PROMPT_BGV = ""
+SYS_PROMPT_GAMING_SUPERVISOR = ""
