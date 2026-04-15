@@ -2,7 +2,7 @@ import os, re, subprocess, traceback, glob, shutil
 from datetime import datetime
 
 from vid_engine import context
-from vid_engine.llm import get_llm_keywords
+from vid_engine.llm import get_llm_keywords_default, get_llm_keywords_gaming
 from vid_engine.assets import fetch_and_choose_bgm
 from vid_engine.templates.default import DefaultTemplate
 
@@ -14,7 +14,7 @@ def build_video_pipeline(target_text, out_name, template=None):
     print(f"\n[🚀] Booting AI Pipeline for: {out_name}", flush=True)
 
     raw_text = target_text.replace('**','').replace('###','')
-    sentences_list = []
+    sentences_list =[]
     for match in re.finditer(r'[^.!?]+[.!?]*', raw_text):
         s = match.group().strip()
         if len(s) > 10:
@@ -22,14 +22,24 @@ def build_video_pipeline(target_text, out_name, template=None):
 
     print(f"   🎬 {len(sentences_list)} scenes (sentences) | {context.VIDEO_FORMAT} | {context.VOICE}", flush=True)
 
-    print("\n[📡] Connecting to Gemini to build Scene Prompts & BGM Mood...", flush=True)
-    llm_data = get_llm_keywords(sentences_list)
+    is_gaming = template.__class__.__name__ == "GamingTemplate"
 
-    if not llm_data or not llm_data[0]:
-        print("[❌] Error: Failed to generate Scene Prompts. All LLM models exhausted.", flush=True)
-        return False
-
-    llm_kw, bgm_mood = llm_data
+    if is_gaming:
+        print("\n[📡] Connecting to Gemini to build Gaming Prompts...", flush=True)
+        llm_data = get_llm_keywords_gaming(sentences_list)
+        if not llm_data:
+            print("[❌] Error: Failed to generate Scene Prompts. All LLM models exhausted.", flush=True)
+            return False
+        llm_kw, bgm_mood, global_game_name = llm_data
+        global_meta = {"global_game_name": global_game_name}
+    else:
+        print("\n[📡] Connecting to Gemini to build Scene Prompts...", flush=True)
+        llm_data = get_llm_keywords_default(sentences_list)
+        if not llm_data:
+            print("[❌] Error: Failed to generate Scene Prompts. All LLM models exhausted.", flush=True)
+            return False
+        llm_kw, bgm_mood = llm_data
+        global_meta = None
 
     print("[🎧] Securing Global Background Music Track...", flush=True)
     bgm_file = fetch_and_choose_bgm(bgm_mood)
@@ -37,7 +47,7 @@ def build_video_pipeline(target_text, out_name, template=None):
     scene_data =[]
     for i, sentence_text in enumerate(sentences_list):
         try:
-            s_file, s_dur = template.make_scene(sentence_text, i, res, kw=llm_kw[i] if llm_kw else None)
+            s_file, s_dur = template.make_scene(sentence_text, i, res, kw=llm_kw[i] if llm_kw else None, global_meta=global_meta)
             scene_data.append({"file": s_file, "dur": s_dur, "idx": i})
         except Exception as e:
             print(f"[!] Scene {i+1} failed: {e}", flush=True)
@@ -87,7 +97,7 @@ def build_video_pipeline(target_text, out_name, template=None):
     print(f"\n[🧹] Archiving workspace files to '{archive_dir}' (Preserving Final Rendered Videos)...", flush=True)
     for ext in["*.mp3","*.vtt","*.mp4","*.webp", "*.txt", "*.jpg", "*.m4a", "*.wav", "*.srt", "*.gif"]:
         for f in glob.glob(ext):
-            if f in["Video_and_Music_Sup.txt", "gif_selector.txt", "BGV_selector.txt"]:
+            if f in["Video_and_Music_Sup.txt", "gif_selector.txt", "BGV_selector.txt", "GAMING_SUPERVISOR.txt"]:
                 continue
             if f not in context.SUCCESSFUL_VIDEOS:
                 try: shutil.move(f, os.path.join(archive_dir, f))
