@@ -91,7 +91,7 @@ class DefaultTemplate(BaseTemplate):
                 if w1 > h1 and w2 > h2:
                     layout_type = 'stack'
 
-            current_items = []
+            current_items =[]
             for p in active_cards:
                 if p['intensity'] > 0:
                     current_items.append({
@@ -121,7 +121,7 @@ class DefaultTemplate(BaseTemplate):
                 drawn_active = [p for p in active_cards if p['intensity'] > 0.01]
                 draw_gap_px = 20 * (sum(p['intensity'] for p in drawn_active) / len(drawn_active)) if drawn_active else 0
 
-                items_to_draw = []
+                items_to_draw =[]
                 for p in sorted(drawn_active, key=lambda x: x['start']):
                     intensity = p['intensity']
                     anim = p['img']
@@ -175,7 +175,7 @@ class DefaultTemplate(BaseTemplate):
 
         return vid_clip.fl(process_frame)
 
-    def make_scene(self, sentence_text, idx, res, kw=None):
+    def make_scene(self, sentence_text, idx, res, kw=None, global_meta=None):
         W, H = res
         print(f"\n--- Scene {idx+1} ---", flush=True)
         af, sf = f"a{idx}.mp3", f"s{idx}.vtt"
@@ -188,7 +188,7 @@ class DefaultTemplate(BaseTemplate):
 
         if kw:
             bgs = kw.get("bg_keywords", ["ocean"])
-            pps = kw.get("gifs", [])
+            pps = kw.get("gifs",[])
             wks = kw.get("wiki",[])
 
             bgs_str = bgs[0] if bgs else "none"
@@ -198,12 +198,12 @@ class DefaultTemplate(BaseTemplate):
             print(f"   🧠 {len(bgs)} Keyword ({bgs_str}) | {len(pps_list)} Giphy GIFs ({', '.join(pps_list)}) | {len(wks_list)} Wikipedia Images mapped ({', '.join(wks_list)})", flush=True)
         else:
             bgs = ["nature"]
-            pps, wks = [], []
+            pps, wks = [],[]
 
         popups = []
 
         valid_wks =[w for w in wks if w.get("search") and w.get("keyword")]
-        valid_pps = [p for p in pps if p.get("keyword") and p.get("search_query")]
+        valid_pps =[p for p in pps if p.get("keyword") and p.get("search_query")]
 
         mapped_pps =[]
         for em_dict in valid_pps:
