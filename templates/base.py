@@ -1,4 +1,4 @@
 class BaseTemplate:
     """Interface for rendering video scenes."""
-    def make_scene(self, sentence_text, idx, res, kw=None):
+    def make_scene(self, sentence_text, idx, res, kw=None, global_meta=None):
         raise NotImplementedError("Each template must implement the make_scene method.")
