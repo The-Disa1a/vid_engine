@@ -7,23 +7,20 @@ def get_youtube_gameplay(game_name):
     search_query = f"{game_name} gameplay no commentary creative commons"
     print(f"\n[📡] Searching YouTube for global gameplay hook: '{search_query}'...", flush=True)
 
-    # 🟢 BYPASS FIX: Impersonate Chrome and skip the web player
-    cmd =[
-        "yt-dlp", 
-        f"ytsearch10:{search_query}", 
-        "--dump-json", 
-        "--no-playlist", 
-        "--flat-playlist",
+    # Search using web client + impersonation (V3 Logic)
+    search_cmd = [
+        "yt-dlp", f"ytsearch10:{search_query}",
+        "--dump-json", "--no-playlist", "--flat-playlist",
         "--impersonate", "chrome",
-        "--extractor-args", "youtube:player_client=android,web"
+        "--extractor-args", "youtube:player_client=web"
     ]
     
     if os.path.exists("cookies.txt"):
-        cmd.extend(["--cookies", "cookies.txt"])
+        search_cmd.extend(["--cookies", "cookies.txt"])
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(search_cmd, capture_output=True, text=True)
     
-    all_videos =[]
+    all_videos = []
     for line in result.stdout.strip().split("\n"):
         if not line: continue
         try:
@@ -36,135 +33,94 @@ def get_youtube_gameplay(game_name):
         except: pass
 
     if not all_videos:
-        print(f"[⚠️] No YouTube gameplay found for {game_name}. Error log: {result.stderr}", flush=True)
+        print(f"[⚠️] No YouTube gameplay found. Search failed.", flush=True)
         return None
 
+    # Let Gemma choose the best ID (Logic preserved)
     ranked_id = all_videos[0]['id']
     ranked_dur = all_videos[0]['duration']
-    
     try:
         from google import genai
         from google.genai import types
-
-        system_instruction = "You are a YouTube Gaming aesthetic evaluator. Pick the best high-quality gameplay video to use as a background hook. Avoid weird mods or tutorials. Return a JSON with the key 'id'."
-        
-        schema_def = genai.types.Schema(
-            type = genai.types.Type.OBJECT,
-            required =["id"],
-            properties = {"id": genai.types.Schema(type = genai.types.Type.STRING)},
-        )
-
-        cfg = types.GenerateContentConfig(
-            thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
-            response_mime_type="application/json",
-            response_schema=schema_def,
-            system_instruction=[types.Part.from_text(text=system_instruction)]
-        )
-
-        prompt = f"Target Game: {game_name}\nAvailable Videos:\n"
-        for v in all_videos: prompt += f"- ID: {v['id']} | Title: {v['title']}\n"
-
+        system_instruction = "You are a Gaming Expert. Pick the best high-quality gameplay video ID from the list. Return JSON with key 'id'."
+        schema_def = genai.types.Schema(type=genai.types.Type.OBJECT, required=["id"], properties={"id": genai.types.Schema(type=genai.types.Type.STRING)})
+        cfg = types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_level="HIGH"), response_mime_type="application/json", response_schema=schema_def, system_instruction=[types.Part.from_text(text=system_instruction)])
+        prompt = f"Target Game: {game_name}\nVideos:\n" + "\n".join([f"- ID: {v['id']} | {v['title']}" for v in all_videos])
         for m in context.GEMMA_MODELS:
-            success = False
-            while context.CURRENT_GEMINI_INDEX < len(context.GEMINI_API_KEYS):
-                try:
-                    client = genai.Client(api_key=context.GEMINI_API_KEYS[context.CURRENT_GEMINI_INDEX])
-                    resp = client.models.generate_content(
-                        model=m,
-                        contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
-                        config=cfg
-                    )
-                    
-                    clean_text = re.sub(r'^```(?:json)?\s*', '', resp.text.strip())
-                    clean_text = re.sub(r'\s*```$', '', clean_text)
-                    parsed_json = json.loads(clean_text)
-
-                    if "id" in parsed_json:
-                        selected_id = parsed_json["id"]
-                        valid_match = next((v for v in all_videos if v['id'] == selected_id), None)
-                        if valid_match:
-                            ranked_id = valid_match['id']
-                            ranked_dur = valid_match['duration']
-                            print(f"[🤖 Gemma Choosed]: {valid_match['title']}", flush=True)
-                            success = True
-                            break
-                except Exception as e:
-                    err_str = str(e)
-                    if "429" in err_str or "quota" in err_str.lower(): context.CURRENT_GEMINI_INDEX += 1
-                    else: break
-            if success: break
+            try:
+                client = genai.Client(api_key=context.GEMINI_API_KEYS[context.CURRENT_GEMINI_INDEX])
+                resp = client.models.generate_content(model=m, contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])], config=cfg)
+                parsed = json.loads(re.sub(r'```(?:json)?|```', '', resp.text).strip())
+                if "id" in parsed:
+                    v_match = next((v for v in all_videos if v['id'] == parsed["id"]), None)
+                    if v_match:
+                        ranked_id, ranked_dur = v_match['id'], v_match['duration']
+                        print(f"[🤖 Gemma Selected]: {v_match['title']}", flush=True)
+                        break
+            except: context.CURRENT_GEMINI_INDEX += 1
     except: pass
 
-    # --- CALCULATE STRICT 3-MINUTE SLICE ---
-    slice_length = 180
-    if ranked_dur <= slice_length:
-        start_time = 0
-        end_time = ranked_dur
-    else:
-        start_time = min(int(ranked_dur * 0.2), ranked_dur - slice_length)
-        end_time = start_time + slice_length
-        
-    final_file = f"yt_bg_{ranked_id}.mp4"
-    if os.path.exists(final_file):
-        print(f"[✅] YouTube hook already exists: {final_file}", flush=True)
-        return final_file
+    # Calculate Slice (Strict 180s)
+    slice_len = 180
+    start_t = min(int(ranked_dur * 0.2), max(0, ranked_dur - slice_len))
+    end_t = start_t + slice_len
+    final_output = f"yt_bg_{ranked_id}.mp4"
 
-    # --- DOWNLOAD FULL VIDEO FIRST ---
-    temp_full_file = f"temp_full_{ranked_id}.mp4"
-    print(f"   📦 Downloading FULL YouTube Video '{ranked_id}' (Restricted to 1080p MP4)...", flush=True)
+    if os.path.exists(final_output):
+        print(f"[✅] Hook already exists: {final_output}")
+        return final_output
+
+    print(f"   📦 Downloading FULL YouTube Video '{ranked_id}' (V3 Stable Mode)...", flush=True)
+    temp_raw_prefix = f"raw_download_{ranked_id}"
     
-    dl_cmd =[
+    # V3 Stable Download Command
+    dl_cmd = [
         "yt-dlp",
-        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
+        "-f", "bv*+ba/best", # Robust format chain
         "--merge-output-format", "mp4",
-        "--force-overwrites",
+        "--js-runtimes", "node",
+        "--extractor-args", "youtube:player_client=web",
         "--impersonate", "chrome",
-        "--extractor-args", "youtube:player_client=android,web",
-        "-o", temp_full_file
+        "--no-check-certificate", "--no-warnings",
+        "-o", f"{temp_raw_prefix}.%(ext)s"
     ]
-    
-    if os.path.exists("cookies.txt"):
-        dl_cmd.extend(["--cookies", "cookies.txt"])
-        
+    if os.path.exists("cookies.txt"): dl_cmd.extend(["--cookies", "cookies.txt"])
     dl_cmd.append(f"https://www.youtube.com/watch?v={ranked_id}")
-    
-    result = subprocess.run(dl_cmd, capture_output=True, text=True)
-    
-    # Verify download succeeded (accounting for extension changes)
-    downloaded_temp = glob.glob(f"temp_full_{ranked_id}.*")
-    
-    if not downloaded_temp:
-        print(f"   [⚠️] yt-dlp full download failed. Error:\n{result.stderr}", flush=True)
+
+    subprocess.run(dl_cmd)
+    downloaded_files = glob.glob(f"{temp_raw_prefix}.*")
+
+    # Fallback Mode (Ultra Safe)
+    if not downloaded_files:
+        print("\n   [⚠️] Initial download failed. Trying fallback safe mode...", flush=True)
+        fb_cmd = ["yt-dlp", "-f", "best", "--js-runtimes", "node", "-o", f"{temp_raw_prefix}.%(ext)s", f"https://www.youtube.com/watch?v={ranked_id}"]
+        subprocess.run(fb_cmd)
+        downloaded_files = glob.glob(f"{temp_raw_prefix}.*")
+
+    if not downloaded_files:
+        print("   [❌] YouTube download failed completely.")
         return None
 
-    actual_temp_file = downloaded_temp[0]
+    actual_raw_file = downloaded_files[0]
     
-    # --- SLICE LOCALLY WITH FFMPEG ---
-    print(f"   ✂️ Slicing exactly {end_time - start_time}s using FFmpeg (No re-encoding)...", flush=True)
-    
-    ffmpeg_cmd =[
-        "ffmpeg", "-y",
-        "-ss", str(start_time),
-        "-to", str(end_time),
-        "-i", actual_temp_file,
-        "-c", "copy",
-        final_file
+    # FFmpeg Slice & Convert (V3 Stable Encoding)
+    print(f"   ✂️ Slicing 3:00 window and converting to stable MP4...", flush=True)
+    ffmpeg_cmd = [
+        "ffmpeg", "-y", "-ss", str(start_t), "-t", str(slice_len),
+        "-i", actual_raw_file,
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-an", # No audio
+        final_output
     ]
-    
     subprocess.run(ffmpeg_cmd, capture_output=True)
-    
-    # --- CLEANUP MASSIVE FULL VIDEO ---
-    try:
-        os.remove(actual_temp_file)
-        print("   🧹 Deleted massive temp video to save space.", flush=True)
-    except: pass
 
-    if os.path.exists(final_file):
-        print(f"[✅] YouTube hook successfully downloaded and sliced! ({final_file})", flush=True)
-        return final_file
-    else:
-        print("   [⚠️] FFmpeg local slicing failed.", flush=True)
-        return None
+    if os.path.exists(final_output):
+        print(f"   [✅] Gaming hook ready! Size: {os.path.getsize(final_output)/(1024*1024):.2f}MB", flush=True)
+        try: os.remove(actual_raw_file)
+        except: pass
+        return final_output
+    
+    return None
 
 def fetch_and_choose_bgm(mood_phrase):
     search_query = f"{mood_phrase} background music audio library no copyright"
